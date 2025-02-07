@@ -245,14 +245,103 @@ def evaluate_attack(n_samples=10000, test_size=0.2, delta_x=0x1):
         'thresholds': thresholds,
         'success_rates': success_rates
     }
+    
+
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+import random
+import matplotlib.pyplot as plt
+
+def train_random_forest(n_samples=10000, delta_x=0x1):
+    """Train Random Forest classifier"""
+    # Generate training data
+    X_train, y_train = generate_training_data(n_samples, delta_x)
+    
+    # Initialize and train Random Forest
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    print("Training Random Forest classifier...")
+    rf.fit(X_train, y_train)
+    return rf
+
+def test_attack_rf(rf, n_tests=1000, delta_x=0x1, threshold=0.7):
+    """Test the Random Forest-based attack"""
+    successful_predictions = 0
+    
+    for _ in tqdm(range(n_tests), desc="Testing attack"):
+        # Generate test message and its delta variant
+        m = random.getrandbits(16)
+        m_delta = m ^ delta_x
+        
+        # Get ciphertexts
+        c = encrypt_block(m)
+        c_delta = encrypt_block(m_delta)
+        
+        # Extract features and predict
+        features = extract_features(c, c_delta)
+        prediction = rf.predict_proba([features])[0][1]  # Probability of class 1
+        
+        if prediction >= threshold:
+            successful_predictions += 1
+    
+    success_rate = successful_predictions / n_tests
+    return success_rate
+
+def evaluate_attack_rf(n_samples=10000, test_size=0.2, delta_x=0x1):
+    """Evaluate the Random Forest-based attack with detailed metrics"""
+    print("Generating dataset...")
+    X, y = generate_training_data(n_samples, delta_x)
+    
+    # Split data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    
+    # Train Random Forest
+    print("\nTraining Random Forest classifier...")
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(X_train, y_train)
+    
+    # Make predictions
+    print("\nGenerating predictions...")
+    y_pred = rf.predict(X_test)
+    y_pred_prob = rf.predict_proba(X_test)[:, 1]
+    
+    # Calculate metrics
+    accuracy = accuracy_score(y_test, y_pred)
+    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='binary')
+    conf_matrix = confusion_matrix(y_test, y_pred)
+    
+    # Calculate success rate at different thresholds
+    thresholds = np.arange(0.5, 1.0, 0.1)
+    success_rates = []
+    
+    for threshold in thresholds:
+        y_pred_threshold = (y_pred_prob >= threshold).astype(int)
+        success_rate = accuracy_score(y_test, y_pred_threshold)
+        success_rates.append(success_rate)
+    
+    # Get feature importance
+    feature_importance = rf.feature_importances_
+    
+    return {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1,
+        'confusion_matrix': conf_matrix,
+        'thresholds': thresholds,
+        'success_rates': success_rates,
+        'feature_importance': feature_importance
+    }
 
 if __name__ == "__main__":
     # Parameters
     n_samples = 10000
     delta_x = 0x1
     
-    print("Starting SVM-based attack evaluation on SPN cipher...")
-    results = evaluate_attack(n_samples, delta_x=delta_x)
+    print("Starting Random Forest-based attack evaluation on SPN cipher...")
+    results = evaluate_attack_rf(n_samples, delta_x=delta_x)
     
     # Print results
     print("\nEvaluation Results:")
@@ -264,11 +353,17 @@ if __name__ == "__main__":
     print("\nConfusion Matrix:")
     print(results['confusion_matrix'])
     
+    # Print feature importance
+    print("\nFeature Importance:")
+    features = ['Hamming Distance', 'XOR Difference'] + [f'Nibble {i} Diff' for i in range(4)]
+    for feature, importance in zip(features, results['feature_importance']):
+        print(f"{feature}: {importance:.4f}")
+    
     print("\nSuccess Rates at Different Thresholds:")
     for threshold, success_rate in zip(results['thresholds'], results['success_rates']):
         print(f"Threshold {threshold:.1f}: {success_rate*100:.2f}%")
     
-    # Optional: Plot success rates vs thresholds
+    # Plot success rates vs thresholds
     plt.figure(figsize=(10, 6))
     plt.plot(results['thresholds'], results['success_rates'], marker='o')
     plt.title('Success Rate vs Decision Threshold')
